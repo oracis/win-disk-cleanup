@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+# bat 必须是 CRLF，纯 LF 的批处理在 cmd 下会解析错乱
+*.bat text eol=crlf
+*.cmd text eol=crlf
