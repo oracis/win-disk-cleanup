@@ -130,5 +130,6 @@ st.st_file_attributes & 0x400  # REPARSE_POINT = symlink/junction
 
 ## 参考
 
-本机（DELL Win10）实测清单见 `references/local-findings.md` —— 作为真实案例参考，
-**不要照抄里面的路径和大小到别的机器上**。
+- 仓库：<https://github.com/oracis/win-disk-cleanup>
+- 本机（DELL Win10）实测清单见 `references/local-findings.md` —— 作为真实案例参考，
+  **不要照抄里面的路径和大小到别的机器上**。
