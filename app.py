@@ -71,9 +71,11 @@ def _read_body(handler):
 
 def _serve_static(handler, rel):
     if rel in ("", "/"):
-        rel = "/index.html"
+        rel = "index.html"
+    elif rel.startswith("/static/"):
+        rel = rel[len("/static/"):]
     # 防目录穿越
-    path = os.path.normpath(os.path.join(STATIC, rel.lstrip("/")))
+    path = os.path.normpath(os.path.join(STATIC, rel))
     if not path.startswith(STATIC) or not os.path.isfile(path):
         handler.send_error(404, "Not found")
         return
