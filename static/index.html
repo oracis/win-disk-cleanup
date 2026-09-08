@@ -9,103 +9,205 @@
 <body>
 <header class="topbar">
   <div class="brand">
-    <span class="logo">🧹</span>
-    <div>
+    <span class="logo" aria-hidden="true">🧹</span>
+    <div class="brand-text">
       <h1>Win Disk Cleanup</h1>
       <p class="sub">AI 分级 · 只读优先 · 删除需确认</p>
     </div>
   </div>
-  <div class="badges">
+  <div class="topbar-actions">
     <span id="adminBadge" class="badge badge-warn">检测中…</span>
-    <button id="btnElevate" class="badge badge-elevate" style="display:none;cursor:pointer">以管理员重启</button>
-    <span class="badge badge-info">清理的是本机磁盘</span>
+    <button id="btnElevate" class="btn primary sm" style="display:none" title="请求 UAC 以管理员身份重启">
+      <span class="icon">🛡️</span> 以管理员重启
+    </button>
   </div>
 </header>
 
 <main>
-  <!-- 盘面 -->
-  <section class="card">
-    <h2>① 盘面摸底</h2>
-    <div id="diskDrives" class="drives"></div>
-    <div id="diskSys" class="sysinfo"></div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-tab="overview">
+      <span class="icon">📊</span> 概览
+    </button>
+    <button class="tab" data-tab="scan">
+      <span class="icon">🔍</span> 磁盘扫描
+    </button>
+    <button class="tab" data-tab="registry">
+      <span class="icon">🧾</span> 注册表清理
+    </button>
+    <button class="tab" data-tab="programs">
+      <span class="icon">🗑️</span> 卸载器
+    </button>
+    <button class="tab" data-tab="logs">
+      <span class="icon">📋</span> 日志
+    </button>
+  </nav>
+
+  <!-- ① 概览 -->
+  <section id="tab-overview" class="tab-pane active">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head">
+          <h2><span class="icon">💽</span> 磁盘空间</h2>
+          <button class="btn ghost sm" id="btnRefreshDisk">刷新</button>
+        </div>
+        <div id="diskDrives" class="drives"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2><span class="icon">⚙️</span> 系统信息</h2>
+        </div>
+        <div id="diskSys" class="sysinfo"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2><span class="icon">🎨</span> 分级说明</h2>
+      </div>
+      <div class="tier-legend">
+        <div class="tier-item tier-a">
+          <span class="tier-dot"></span>
+          <div>
+            <strong>A · 可清理</strong>
+            <p>缓存、日志、残包、空目录。确认后删除。</p>
+          </div>
+        </div>
+        <div class="tier-item tier-b">
+          <span class="tier-dot"></span>
+          <div>
+            <strong>B · 需谨慎</strong>
+            <p>不确定是否安全，人工核对后再操作。</p>
+          </div>
+        </div>
+        <div class="tier-item tier-c">
+          <span class="tier-dot"></span>
+          <div>
+            <strong>C · 走卸载器</strong>
+            <p>完整安装程序，请用卸载器引导移除。</p>
+          </div>
+        </div>
+        <div class="tier-item tier-d">
+          <span class="tier-dot"></span>
+          <div>
+            <strong>D · 禁止删除</strong>
+            <p>个人数据或系统关键目录，界面上禁选。</p>
+          </div>
+        </div>
+      </div>
+    </div>
   </section>
 
-  <!-- 扫描 -->
-  <section class="card">
-    <h2>② 分层扫描</h2>
-    <div class="scan-row">
-      <input id="scanPath" type="text" placeholder="要扫描的目录，如 C:\Users\DELL" />
-      <input id="scanBudget" type="number" min="5" max="600" value="60" title="每层限时(秒)" />
-      <input id="scanExclude" type="text" placeholder="排除项,逗号分隔，如 Windows,Node" />
-      <button id="btnScan" class="btn primary">扫描</button>
+  <!-- ② 磁盘扫描 -->
+  <section id="tab-scan" class="tab-pane">
+    <div class="card">
+      <div class="card-head">
+        <h2><span class="icon">🔍</span> 分层扫描</h2>
+      </div>
+      <div class="scan-panel">
+        <div class="field-row">
+          <label class="field-label">目标目录</label>
+          <input id="scanPath" type="text" placeholder="例如 C:\Users\DELL" />
+        </div>
+        <div class="field-row field-row-2">
+          <div>
+            <label class="field-label">每层限时（秒）</label>
+            <input id="scanBudget" type="number" min="5" max="600" value="60" />
+          </div>
+          <div>
+            <label class="field-label">排除项（逗号分隔）</label>
+            <input id="scanExclude" type="text" placeholder="例如 Windows,Node" />
+          </div>
+        </div>
+        <div class="quick-row">
+          <span class="muted">快捷:</span>
+          <button class="chip" data-p="C:\Users\DELL">用户目录</button>
+          <button class="chip" data-p="%LOCALAPPDATA%">AppData\Local</button>
+          <button class="chip" data-p="%APPDATA%">AppData\Roaming</button>
+          <button class="chip" data-p="C:\ProgramData">ProgramData</button>
+          <button class="chip" data-p="C:\Program Files">Program Files</button>
+        </div>
+        <div class="scan-actions">
+          <button id="btnScan" class="btn primary">开始扫描</button>
+          <span id="scanStatus" class="status"></span>
+        </div>
+      </div>
     </div>
-    <div class="quick">
-      <span>快捷：</span>
-      <button class="chip" data-p="C:\Users\DELL">用户目录</button>
-      <button class="chip" data-p="%LOCALAPPDATA%">AppData\Local</button>
-      <button class="chip" data-p="%APPDATA%">AppData\Roaming</button>
-      <button class="chip" data-p="C:\ProgramData">ProgramData</button>
-      <button class="chip" data-p="C:\Program Files">Program Files</button>
-    </div>
-    <div id="scanStatus" class="status"></div>
-  </section>
 
-  <!-- 结果 -->
-  <section class="card" id="resultCard" style="display:none">
-    <div class="result-head">
-      <h2>③ 分级结果</h2>
-      <div id="tierSummary" class="tier-summary"></div>
-    </div>
-    <div id="resultTable" class="result-table"></div>
-
-    <div class="action-bar">
-      <div id="selInfo" class="sel-info">未选择</div>
-      <button id="btnClean" class="btn danger" disabled>删除选中</button>
-    </div>
-  </section>
-
-  <!-- 日志 -->
-  <section class="card">
-    <h2>④ 清理日志</h2>
-    <button id="btnLog" class="btn ghost">刷新日志</button>
-    <pre id="logView" class="log"></pre>
-  </section>
-
-  <!-- 注册表清理 -->
-  <section class="card" id="regCard">
-    <h2>⑤ 注册表清理 <span class="tag-gray">残留卸载项 / 孤立 MSI</span></h2>
-    <div class="scan-row">
-      <button id="btnRegScan" class="btn primary">扫描残留注册表项</button>
-      <span class="muted">高危：删除前自动备份到 logs/reg_*.reg，需管理员</span>
-    </div>
-    <div id="regStatus" class="status"></div>
-    <div id="regTable" class="result-table"></div>
-    <div class="action-bar" id="regAction" style="display:none">
-      <div id="regSelInfo" class="sel-info">未选择</div>
-      <button id="btnRegClean" class="btn danger">删除选中注册表项</button>
+    <div class="card" id="resultCard" style="display:none">
+      <div class="card-head">
+        <h2><span class="icon">📂</span> 扫描结果</h2>
+        <div id="tierSummary" class="tier-summary"></div>
+      </div>
+      <div id="resultTable" class="result-table"></div>
+      <div class="action-bar">
+        <div id="selInfo" class="sel-info">未选择</div>
+        <button id="btnClean" class="btn danger" disabled>删除选中</button>
+      </div>
     </div>
   </section>
 
-  <!-- 卸载器引导 -->
-  <section class="card" id="progCard">
-    <h2>⑥ 卸载器引导</h2>
-    <div class="scan-row">
-      <button id="btnProgList" class="btn primary">列出已安装程序</button>
-      <button id="btnAppwiz" class="btn ghost">打开「程序和功能」</button>
-      <input id="progFilter" type="text" placeholder="筛选名称…" />
+  <!-- ③ 注册表清理 -->
+  <section id="tab-registry" class="tab-pane">
+    <div class="card">
+      <div class="card-head">
+        <h2><span class="icon">🧾</span> 注册表清理</h2>
+        <span class="tag tag-danger">高危 · 操作前自动备份</span>
+      </div>
+      <p class="lead muted">扫描卸载程序已不存在的残留项，以及孤立的 MSI 产品项。删除前会自动导出备份到 <code>logs/reg_*.reg</code>。</p>
+      <div class="scan-actions">
+        <button id="btnRegScan" class="btn primary">扫描残留注册表项</button>
+        <span id="regStatus" class="status"></span>
+      </div>
+      <div id="regTable" class="result-table"></div>
+      <div class="action-bar" id="regAction" style="display:none">
+        <div id="regSelInfo" class="sel-info">未选择</div>
+        <button id="btnRegClean" class="btn danger" disabled>删除选中注册表项</button>
+      </div>
     </div>
-    <div id="progStatus" class="status"></div>
-    <div id="progTable" class="result-table"></div>
+  </section>
+
+  <!-- ④ 卸载器 -->
+  <section id="tab-programs" class="tab-pane">
+    <div class="card">
+      <div class="card-head">
+        <h2><span class="icon">🗑️</span> 卸载器引导</h2>
+        <button id="btnAppwiz" class="btn ghost sm">打开「程序和功能」</button>
+      </div>
+      <div class="prog-toolbar">
+        <button id="btnProgList" class="btn primary">列出已安装程序</button>
+        <input id="progFilter" type="text" placeholder="筛选程序名称…" />
+      </div>
+      <div id="progStatus" class="status"></div>
+      <div id="progTable" class="result-table"></div>
+    </div>
+  </section>
+
+  <!-- ⑤ 日志 -->
+  <section id="tab-logs" class="tab-pane">
+    <div class="card">
+      <div class="card-head">
+        <h2><span class="icon">📋</span> 清理日志</h2>
+        <button id="btnLog" class="btn ghost sm">刷新日志</button>
+      </div>
+      <pre id="logView" class="log"></pre>
+    </div>
   </section>
 </main>
 
-<!-- 确认弹窗 -->
+<!-- 确认删除弹窗 -->
 <div id="confirmModal" class="modal" style="display:none">
   <div class="modal-box">
-    <h3>⚠️ 确认删除</h3>
-    <p>即将永久删除以下 <b id="confirmCount">0</b> 项，合计 <b id="confirmSize">0</b>：</p>
+    <div class="modal-head">
+      <span class="modal-icon">⚠️</span>
+      <h3>确认永久删除</h3>
+    </div>
+    <p class="modal-lead">即将删除 <b id="confirmCount">0</b> 项，合计 <b id="confirmSize">0</b>：</p>
     <ul id="confirmList" class="confirm-list"></ul>
-    <p class="warn-text">此操作不可撤销（走 WinAPI 永久删除，不入回收站）。确定？</p>
+    <div class="warn-box">
+      <span class="icon">🚨</span>
+      此操作不可撤销（走 WinAPI 永久删除，不入回收站）。请再次确认。
+    </div>
     <div class="modal-actions">
       <button id="btnCancel" class="btn ghost">取消</button>
       <button id="btnDoClean" class="btn danger">确认删除</button>
