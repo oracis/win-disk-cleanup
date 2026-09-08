@@ -28,6 +28,7 @@ win-disk-cleanup Web 应用（零依赖，纯标准库 + ctypes）。
 """
 import os
 import sys
+import time
 import json
 import threading
 import webbrowser
@@ -154,10 +155,13 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/appwiz":
             return _send_json(self, cleanlib.open_appwiz())
         if u.path == "/api/elevate":
+            if cleanlib.is_admin():
+                return _send_json(self, {"ok": True, "admin": True})
             ok = cleanlib.relaunch_elevated()
             if ok:
-                threading.Thread(target=self.server.shutdown, daemon=True).start()
-            return _send_json(self, {"ok": ok})
+                # 已拉起提权副本：先让浏览器收到响应，再停止旧服务让出端口
+                threading.Timer(0.8, self.server.shutdown).start()
+            return _send_json(self, {"ok": ok, "admin": False})
         self.send_error(404)
 
 
@@ -171,6 +175,29 @@ def _should_elevate():
     return not cleanlib.is_admin()
 
 
+def _bind_server():
+    """创建 HTTP 服务。提权副本（--elevated）需等旧进程退出释放端口，
+    因此最多重试 45 秒；普通启动立即失败并给出明确报错。"""
+    if "--elevated" in sys.argv:
+        deadline = time.time() + 45
+        last = None
+        while time.time() < deadline:
+            try:
+                return ThreadingHTTPServer((HOST, PORT), Handler)
+            except OSError as e:
+                last = e
+                time.sleep(0.4)
+        print("[错误] 等待端口 %d 释放超时（45s）：%s" % (PORT, last))
+        print("  提示：若旧实例未退出，请关闭后重试。")
+        return None
+    try:
+        return ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as e:
+        print("[错误] 端口 %d 被占用：%s" % (PORT, e))
+        print("  提示：可能已有实例在运行，或需先关闭旧实例。")
+        return None
+
+
 def main():
     # 管理员自动提权：非管理员且未被显式禁用时，自启 UAC 提权副本并退出自身。
     if _should_elevate():
@@ -180,7 +207,9 @@ def main():
         print("[提示] 提权被取消/失败，仍以普通权限运行（注册表清理等需管理员的功能受限）")
 
     url = "http://%s:%d" % (HOST, PORT)
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = _bind_server()
+    if server is None:
+        sys.exit(1)
     print("win-disk-cleanup 已启动: %s" % url)
     print("  （本工具清理的是【运行它的这台机器】的磁盘）")
     if not cleanlib.is_admin():

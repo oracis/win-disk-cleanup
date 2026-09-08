@@ -828,15 +828,33 @@ def open_appwiz():
 
 
 def relaunch_elevated(extra_args=()):
-    """以管理员重启自身（UAC）。成功返回 True。已带 --elevated 防循环。"""
+    """以管理员重启自身（UAC）。成功返回 True。
+
+    副本固定带 --elevated：表明它是「接管实例」，app.py 会据此在启动时
+    等待旧进程释放端口（重试绑定），避免端口被占导致提权副本秒退。
+    --no-elevate 不传给副本（副本本就以管理员运行，无需再禁提权）。
+    """
+    keep = [a for a in sys.argv[1:] if a not in ("--no-elevate", "--elevated")]
+    keep += list(extra_args)
+    if "--elevated" not in keep:
+        keep.append("--elevated")
     params = '"%s"' % os.path.abspath(sys.argv[0])
-    for a in extra_args:
-        params += " " + a
-    if "--elevated" not in sys.argv and "--no-elevate" not in sys.argv:
-        params += " --elevated"
-    r = ctypes.windll.shell32.ShellExecuteW(
-        None, "runas", sys.executable, params, os.getcwd(), 1)
-    return r > 32
+    if keep:
+        params += " " + " ".join(keep)
+    try:
+        _shell32 = ctypes.windll.shell32
+        # 64 位下句柄/返回值需显式类型，否则按 c_int 溢出
+        _shell32.ShellExecuteW.restype = ctypes.c_ssize_t
+        _shell32.ShellExecuteW.argtypes = [
+            wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR,
+            wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_int,
+        ]
+        r = _shell32.ShellExecuteW(None, "runas", sys.executable,
+                                   params, os.getcwd(), 1)
+        return r > 32
+    except Exception as e:
+        print("[提权] ShellExecuteW 调用失败：%s" % e)
+        return False
 
 
 if __name__ == "__main__":

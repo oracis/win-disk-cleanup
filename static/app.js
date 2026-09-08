@@ -350,9 +350,48 @@ async function doAppwiz() {
 }
 
 async function doElevate() {
-  if (!confirm("将请求 UAC 以管理员身份重启本程序。继续？")) return;
-  const res = await api("/api/elevate", "POST", {});
-  if (!res.ok) alert("提权失败，请右键 start.bat 以管理员运行");
+  if (!confirm("将请求 UAC 以管理员身份重启本程序。\n请在系统弹窗中点击「是」。继续？")) return;
+  const btn = el("btnElevate");
+  const badge = el("adminBadge");
+  btn.disabled = true;
+  badge.textContent = "提权重启中…";
+  btn.textContent = "请确认 UAC…";
+  try {
+    const res = await api("/api/elevate", "POST", {});
+    if (!res.ok && !res.admin) {
+      badge.textContent = "非管理员";
+      btn.disabled = false;
+      btn.innerHTML = '<span class="icon">🛡️</span> 以管理员重启';
+      alert("提权失败（可能取消了 UAC 弹窗）。\n请右键 start.bat → 以管理员身份运行。");
+      return;
+    }
+    if (res.admin) { location.reload(); return; }
+    // 旧进程即将退出让出端口，新管理员副本接管 —— 轮询等待，容忍期间连接失败
+    const t0 = Date.now();
+    const iv = setInterval(async () => {
+      if (Date.now() - t0 > 45000) {
+        clearInterval(iv);
+        badge.textContent = "非管理员";
+        btn.disabled = false;
+        btn.innerHTML = '<span class="icon">🛡️</span> 以管理员重启';
+        alert("等待超时：管理员副本未接管。\n请右键 start.bat → 以管理员身份运行。");
+        return;
+      }
+      try {
+        const r = await fetch("/api/admin", { cache: "no-store" });
+        const j = await r.json();
+        if (j && j.admin) {
+          clearInterval(iv);
+          location.reload();
+        }
+      } catch (e) { /* 服务短暂不可用，属正常切换窗口 */ }
+    }, 700);
+  } catch (e) {
+    badge.textContent = "非管理员";
+    btn.disabled = false;
+    btn.innerHTML = '<span class="icon">🛡️</span> 以管理员重启';
+    alert("提权失败：" + e);
+  }
 }
 
 // ---------- Bind ----------
