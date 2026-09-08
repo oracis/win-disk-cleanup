@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Win Disk Cleanup · 磁盘清理</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">🧹</span>
+    <div>
+      <h1>Win Disk Cleanup</h1>
+      <p class="sub">AI 分级 · 只读优先 · 删除需确认</p>
+    </div>
+  </div>
+  <div class="badges">
+    <span id="adminBadge" class="badge badge-warn">检测中…</span>
+    <span class="badge badge-info">清理的是本机磁盘</span>
+  </div>
+</header>
+
+<main>
+  <!-- 盘面 -->
+  <section class="card">
+    <h2>① 盘面摸底</h2>
+    <div id="diskDrives" class="drives"></div>
+    <div id="diskSys" class="sysinfo"></div>
+  </section>
+
+  <!-- 扫描 -->
+  <section class="card">
+    <h2>② 分层扫描</h2>
+    <div class="scan-row">
+      <input id="scanPath" type="text" placeholder="要扫描的目录，如 C:\Users\DELL" />
+      <input id="scanBudget" type="number" min="5" max="600" value="60" title="每层限时(秒)" />
+      <input id="scanExclude" type="text" placeholder="排除项,逗号分隔，如 Windows,Node" />
+      <button id="btnScan" class="btn primary">扫描</button>
+    </div>
+    <div class="quick">
+      <span>快捷：</span>
+      <button class="chip" data-p="C:\Users\DELL">用户目录</button>
+      <button class="chip" data-p="%LOCALAPPDATA%">AppData\Local</button>
+      <button class="chip" data-p="%APPDATA%">AppData\Roaming</button>
+      <button class="chip" data-p="C:\ProgramData">ProgramData</button>
+      <button class="chip" data-p="C:\Program Files">Program Files</button>
+    </div>
+    <div id="scanStatus" class="status"></div>
+  </section>
+
+  <!-- 结果 -->
+  <section class="card" id="resultCard" style="display:none">
+    <div class="result-head">
+      <h2>③ 分级结果</h2>
+      <div id="tierSummary" class="tier-summary"></div>
+    </div>
+    <div id="resultTable" class="result-table"></div>
+
+    <div class="action-bar">
+      <div id="selInfo" class="sel-info">未选择</div>
+      <button id="btnClean" class="btn danger" disabled>删除选中</button>
+    </div>
+  </section>
+
+  <!-- 日志 -->
+  <section class="card">
+    <h2>④ 清理日志</h2>
+    <button id="btnLog" class="btn ghost">刷新日志</button>
+    <pre id="logView" class="log"></pre>
+  </section>
+</main>
+
+<!-- 确认弹窗 -->
+<div id="confirmModal" class="modal" style="display:none">
+  <div class="modal-box">
+    <h3>⚠️ 确认删除</h3>
+    <p>即将永久删除以下 <b id="confirmCount">0</b> 项，合计 <b id="confirmSize">0</b>：</p>
+    <ul id="confirmList" class="confirm-list"></ul>
+    <p class="warn-text">此操作不可撤销（走 WinAPI 永久删除，不入回收站）。确定？</p>
+    <div class="modal-actions">
+      <button id="btnCancel" class="btn ghost">取消</button>
+      <button id="btnDoClean" class="btn danger">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

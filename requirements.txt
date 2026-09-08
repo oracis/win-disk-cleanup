@@ -1,0 +1,2 @@
+# 零依赖：本应用仅用 Python 标准库（http.server + ctypes）。
+# 无需 pip install 任何东西。直接 `python app.py` 即可。
