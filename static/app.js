@@ -51,8 +51,8 @@ async function loadDisk() {
   sys.innerHTML = html;
 
   const b = el("adminBadge");
-  if (d.admin) { b.textContent = "管理员 ✓"; b.className = "badge badge-ok"; }
-  else { b.textContent = "非管理员"; b.className = "badge badge-warn"; }
+  if (d.admin) { b.textContent = "管理员 ✓"; b.className = "badge badge-ok"; el("btnElevate").style.display = "none"; }
+  else { b.textContent = "非管理员"; b.className = "badge badge-warn"; el("btnElevate").style.display = ""; }
 }
 
 function human(n) {
@@ -190,6 +190,146 @@ async function loadLog() {
   el("logView").textContent = (r.lines && r.lines.length) ? r.lines.join("\n") : "（暂无日志）";
 }
 
+// ---------- 注册表清理 ----------
+let regItems = [];
+const regSelected = new Set();
+
+async function loadReg() {
+  el("btnRegScan").disabled = true;
+  el("regStatus").textContent = "扫描残留注册表项中…";
+  const r = await api("/api/reg");
+  el("btnRegScan").disabled = false;
+  if (!r.ok) { el("regStatus").textContent = "失败: " + (r.error || "未知"); return; }
+  regItems = r.items || [];
+  el("regStatus").textContent = regItems.length
+    ? ("发现 " + regItems.length + " 个残留注册表项（D 档，删除会先备份）")
+    : "未发现明显的残留注册表项";
+  renderReg(regItems);
+}
+
+function renderReg(items) {
+  const wrap = el("regTable");
+  wrap.innerHTML = "";
+  if (!items.length) { el("regAction").style.display = "none"; return; }
+  const tbl = document.createElement("table");
+  tbl.innerHTML = '<thead><tr><th style="width:28px"></th><th>名称</th><th>发布者</th>'
+    + '<th>大小</th><th>路径</th><th>说明</th></tr></thead>';
+  const tb = document.createElement("tbody");
+  items.forEach(it => {
+    const tr = document.createElement("tr");
+    tr.className = "disabled";
+    tr.innerHTML = '<td><input type="checkbox" data-path="' + esc(it.key_path) + '"></td>'
+      + '<td class="name" title="' + esc(it.name) + '">' + esc(it.name) + '</td>'
+      + '<td>' + esc(it.publisher || "-") + '</td>'
+      + '<td class="size">' + (it.size_kb ? (it.size_kb / 1024).toFixed(1) + " MB" : "-") + '</td>'
+      + '<td class="reason" title="' + esc(it.key_path) + '">' + esc(shortPath(it.key_path)) + '</td>'
+      + '<td class="reason">' + esc(it.reason) + '</td>';
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  wrap.appendChild(tbl);
+  el("regAction").style.display = "";
+  wrap.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener("change", () => {
+      const p = cb.getAttribute("data-path");
+      if (cb.checked) regSelected.add(p); else regSelected.delete(p);
+      updateRegSel();
+    });
+  });
+  updateRegSel();
+}
+
+function shortPath(p) {
+  const i = p.lastIndexOf("\\");
+  return i >= 0 ? p.slice(0, i + 1) + "…" + p.slice(i + 1) : p;
+}
+
+function updateRegSel() {
+  el("regSelInfo").innerHTML = "已选 <b>" + regSelected.size + "</b> 项";
+  el("btnRegClean").disabled = regSelected.size === 0;
+}
+
+async function doRegClean() {
+  const paths = [...regSelected];
+  if (!paths.length) return;
+  if (!confirm("即将永久删除 " + paths.length + " 个注册表项。\n已自动备份到 logs/reg_*.reg。\n确定删除？")) return;
+  el("btnRegClean").disabled = true;
+  const res = await api("/api/reg-clean", "POST", { paths, confirm: true });
+  el("btnRegClean").disabled = false;
+  let ok = 0, fail = 0, backed = 0;
+  (res.results || []).forEach(x => {
+    if (x.ok) ok++; else fail++;
+    if (x.backup) backed++;
+  });
+  alert("注册表清理：成功 " + ok + " / 失败 " + fail + "\n"
+    + (backed ? "备份文件已存于 logs/reg_*.reg" : "（未生成备份）"));
+  regSelected.clear();
+  await loadReg();
+}
+
+// ---------- 卸载器引导 ----------
+let progItems = [];
+
+async function loadPrograms() {
+  el("btnProgList").disabled = true;
+  el("progStatus").textContent = "枚举已安装程序中…";
+  const r = await api("/api/programs");
+  el("btnProgList").disabled = false;
+  progItems = (r.items || []).filter(x => x.name);
+  applyProgFilter();
+  el("progStatus").textContent = "共 " + progItems.length + " 个程序（按体积排序，可在右侧筛选）";
+}
+
+function applyProgFilter() {
+  const f = (el("progFilter").value || "").trim().toLowerCase();
+  const items = f ? progItems.filter(x => x.name.toLowerCase().includes(f)) : progItems;
+  renderPrograms(items);
+}
+
+function renderPrograms(items) {
+  const wrap = el("progTable");
+  wrap.innerHTML = "";
+  if (!items.length) return;
+  const tbl = document.createElement("table");
+  tbl.innerHTML = '<thead><tr><th>名称</th><th>发布者</th><th>大小</th>'
+    + '<th style="width:120px">操作</th></tr></thead>';
+  const tb = document.createElement("tbody");
+  items.forEach(it => {
+    const tr = document.createElement("tr");
+    const canUninstall = !!it.uninstall_string;
+    tr.innerHTML = '<td class="name" title="' + esc(it.install_location || "") + '">' + esc(it.name) + '</td>'
+      + '<td>' + esc(it.publisher || "-") + '</td>'
+      + '<td class="size">' + (it.size_kb ? (it.size_kb / 1024).toFixed(1) + " MB" : "-") + '</td>'
+      + '<td><button class="btn ghost sm" data-kp="' + esc(it.key_path) + '"'
+      + (canUninstall ? "" : " disabled") + '>启动卸载</button></td>';
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);
+  wrap.appendChild(tbl);
+  wrap.querySelectorAll('button[data-kp]').forEach(b => {
+    b.addEventListener("click", () => doUninstall(b.getAttribute("data-kp")));
+  });
+}
+
+async function doUninstall(keyPath) {
+  if (!confirm("即将启动该程序的卸载器（由系统/厂商提供的原装卸载程序）。继续？")) return;
+  const res = await api("/api/uninstall", "POST", { key_path: keyPath });
+  if (res.ok) alert("已启动卸载器：" + (res.exe || ""));
+  else alert("无法启动：" + (res.error || "未知"));
+}
+
+async function doAppwiz() {
+  const res = await api("/api/appwiz", "POST", {});
+  if (res.ok) alert("已打开「程序和功能」控制面板");
+  else alert("打开失败：" + (res.error || "未知"));
+}
+
+async function doElevate() {
+  if (!confirm("将请求 UAC 以管理员身份重启本程序（当前窗口会关闭，新窗口以管理员运行）。继续？")) return;
+  const res = await api("/api/elevate", "POST", {});
+  if (!res.ok) alert("提权失败，请右键 start.bat 以管理员运行");
+}
+
 // ---------- 绑定 ----------
 document.addEventListener("DOMContentLoaded", () => {
   el("btnScan").addEventListener("click", doScan);
@@ -197,6 +337,12 @@ document.addEventListener("DOMContentLoaded", () => {
   el("btnCancel").addEventListener("click", closeConfirm);
   el("btnDoClean").addEventListener("click", doClean);
   el("btnLog").addEventListener("click", loadLog);
+  el("btnRegScan").addEventListener("click", loadReg);
+  el("btnRegClean").addEventListener("click", doRegClean);
+  el("btnProgList").addEventListener("click", loadPrograms);
+  el("btnAppwiz").addEventListener("click", doAppwiz);
+  el("btnElevate").addEventListener("click", doElevate);
+  el("progFilter").addEventListener("input", applyProgFilter);
   document.querySelectorAll(".chip").forEach(c => {
     c.addEventListener("click", () => { el("scanPath").value = c.getAttribute("data-p"); });
   });

@@ -115,7 +115,8 @@ Defender 实时扫描每个被删文件（`.exe` 还会触发深度扫描），�
 ```
 win-disk-cleanup-app/
 ├── app.py          # 标准库 http.server，提供 /api/* 与静态页面
-├── cleanlib.py     # 核心：盘面/扫描分级/删除/日志（被 Web 与 CLI 共用）
+├── cleanlib.py     # 核心：盘面/扫描分级/删除/日志/注册表/卸载器（被 Web 与 CLI 共用）
+├── tray.py         # 零依赖系统托盘（仅 ctypes；失败自动降级为无托盘）
 ├── static/         # index.html + app.js + style.css（暗色主题）
 └── start.bat       # 一键启动（纯 ASCII，绕过 bat 三大坑）
 ```
@@ -135,10 +136,27 @@ set PORT=8080
 python app.py           # 监听 127.0.0.1:8080
 ```
 
+**可选参数**
+
+```bat
+python app.py --no-elevate   # 关闭「非管理员自动提权」（普通权限运行）
+python app.py --no-tray      # 不显示系统托盘
+```
+
+**四个增强能力**
+
+| 能力 | 说明 | 安全护栏 |
+|---|---|---|
+| **管理员自动提权** | 非管理员启动时自动请求 UAC 提权副本（带 `--elevated` 防自循环）；也可在界面点「以管理员重启」或托盘菜单 | `--no-elevate` 可关；提权失败/取消则降级为普通权限并提示 |
+| **系统托盘图标** | 右下角托盘，右键菜单：打开界面 / 以管理员重启 / 退出 | 纯 ctypes 实现，无第三方依赖；创建失败自动降级为「无托盘」 |
+| **注册表清理** | 扫描残留卸载项（卸载程序已不存在）、孤立 MSI 产品项；可勾选删除 | 删除前 `reg export` 自动备份到 `logs/reg_*.reg`；路径白名单校验（仅 Uninstall / Installer\UserData 范围内）；需管理员 + 二次确认 |
+| **卸载器引导** | 枚举全部已安装程序（名称/发布者/体积），一键启动其原装卸载器；或一键打开系统「程序和功能」 | 只执行来自 Uninstall 子项的命令，且校验 exe 真实存在后再启动，杜绝命令注入 |
+
 **要点**
 
 - 分级逻辑（`classify()`）把每个扫描项标成 A/B/C/D，D 档在界面上**直接禁选**，删之前还有一次弹窗确认 —— 和命令行版同样的保守策略。
-- 删除走 `cleanlib.delete_paths()`，直调 WinAPI 绕过 os 层钩子，每次写 `logs/clean.log`。
+- 文件删除走 `cleanlib.delete_paths()`，直调 WinAPI 绕过 os 层钩子，每次写 `logs/clean.log`。
+- 注册表删除走 `cleanlib.delete_registry_key()`，先备份后删，每次也写日志。
 - **清理的是「运行它的这台机器」的磁盘**。本机双击运行就清你自己的 C 盘；若发布到云服务器，清的是服务器那台机器，不是你的电脑 —— 别搞混。
 
 ## 通用可清项（跨机器成立）

@@ -19,6 +19,7 @@ import os
 import sys
 import time
 import json
+import subprocess
 import ctypes
 import winreg
 from ctypes import wintypes
@@ -375,6 +376,357 @@ def read_log(tail=200):
         return lines[-tail:]
     except Exception:
         return []
+
+
+# ---------- 注册表清理 / 卸载器引导 ----------
+# 仅允许在白名单范围内的注册表项被删除，防误删系统关键项。
+_REG_DELETE_PREFIXES = [
+    "HKLM\\SOFTWARE\\MICROSOFT\\WINDOWS\\CURRENTVERSION\\UNINSTALL\\",
+    "HKLM\\SOFTWARE\\WOW6432NODE\\MICROSOFT\\WINDOWS\\CURRENTVERSION\\UNINSTALL\\",
+    "HKCU\\SOFTWARE\\MICROSOFT\\WINDOWS\\CURRENTVERSION\\UNINSTALL\\",
+    "HKLM\\SOFTWARE\\MICROSOFT\\WINDOWS\\CURRENTVERSION\\INSTALLER\\USERDATA\\",
+]
+
+UNINSTALL_ROOTS = [
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+]
+_ROOT_NAMES = {winreg.HKEY_LOCAL_MACHINE: "HKLM", winreg.HKEY_CURRENT_USER: "HKCU"}
+
+
+def _safe_read(k, name, default=""):
+    try:
+        v, _ = winreg.QueryValueEx(k, name)
+        return v
+    except Exception:
+        return default
+
+
+def _expand_env(s):
+    try:
+        return os.path.expandvars(s) if s else s
+    except Exception:
+        return s
+
+
+def _exe_of(cmd):
+    """从卸载命令里取出可执行文件路径（处理引号包裹）。"""
+    if not cmd:
+        return None
+    c = cmd.strip()
+    if c.startswith('"'):
+        end = c.find('"', 1)
+        exe = c[1:end] if end != -1 else c[1:]
+    else:
+        exe = c.split(' ')[0]
+    return _expand_env(exe)
+
+
+def _exe_missing(us):
+    """判断卸载命令里的可执行文件是否真的不存在（区分 MSI/系统内置命令）。"""
+    exe = _exe_of(us)
+    if not exe:
+        return False
+    if os.path.exists(exe):
+        return False
+    base = os.path.basename(exe).lower()
+    # MsiExec / rundll32 / cmd / powershell / control 等是系统自带，恒存在
+    sysroot = os.environ.get("SystemRoot", "C:\\Windows")
+    import shutil
+    candidates = [
+        os.path.join(sysroot, "system32", base),
+        os.path.join(sysroot, base),
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return False
+    if shutil.which(base):
+        return False
+    return True
+
+
+def _split_reg_path(full):
+    full = full.replace("/", "\\")
+    idx = full.find("\\")
+    if idx < 0:
+        raise ValueError("bad reg path")
+    root, sub = full[:idx], full[idx + 1:]
+    if root == "HKLM":
+        return winreg.HKEY_LOCAL_MACHINE, sub
+    if root == "HKCU":
+        return winreg.HKEY_CURRENT_USER, sub
+    if root == "HKCR":
+        return winreg.HKEY_CLASSES_ROOT, sub
+    raise ValueError("unsupported root: " + root)
+
+
+def _reg_enum_subkeys(hkey, subpath):
+    out = []
+    try:
+        k = winreg.OpenKey(hkey, subpath, 0, winreg.KEY_READ)
+    except Exception:
+        return out
+    try:
+        n = winreg.QueryInfoKey(k)[0]
+        for i in range(n):
+            try:
+                name = winreg.EnumKey(k, i)
+                out.append((hkey, subpath + "\\" + name))
+            except Exception:
+                pass
+    finally:
+        winreg.CloseKey(k)
+    return out
+
+
+def _reg_key_exists(full_path):
+    try:
+        hive, sub = _split_reg_path(full_path)
+        k = winreg.OpenKey(hive, sub, 0, winreg.KEY_READ)
+        winreg.CloseKey(k)
+        return True
+    except Exception:
+        return False
+
+
+def _reg_path_ok(full_path):
+    up = full_path.replace("/", "\\").upper()
+    return any(up.startswith(p) for p in _REG_DELETE_PREFIXES)
+
+
+def _scan_msi_orphans():
+    """扫描孤立的 MSI 产品项（LocalPackage 指向的缓存包已丢失）。需管理员才读得到。"""
+    out = []
+    base = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData"
+    try:
+        k = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base, 0, winreg.KEY_READ)
+    except Exception:
+        return out
+    try:
+        nsid = winreg.QueryInfoKey(k)[0]
+        for i in range(nsid):
+            try:
+                sid = winreg.EnumKey(k, i)
+            except Exception:
+                continue
+            try:
+                pk = winreg.OpenKey(k, sid + r"\Products")
+            except Exception:
+                continue
+            try:
+                np_ = winreg.QueryInfoKey(pk)[0]
+                for j in range(np_):
+                    try:
+                        pid = winreg.EnumKey(pk, j)
+                    except Exception:
+                        continue
+                    try:
+                        ik = winreg.OpenKey(pk, pid + r"\InstallProperties")
+                    except Exception:
+                        continue
+                    try:
+                        lp = winreg.QueryValueEx(ik, "LocalPackage")[0]
+                    except Exception:
+                        winreg.CloseKey(ik)
+                        continue
+                    if lp and not os.path.exists(_expand_env(lp)):
+                        try:
+                            name = winreg.QueryValueEx(ik, "DisplayName")[0]
+                        except Exception:
+                            name = "(MSI %s)" % pid
+                        key_path = "HKLM\\" + base + "\\" + sid + "\\Products\\" + pid
+                        out.append({
+                            "name": name,
+                            "publisher": "",
+                            "key_path": key_path,
+                            "size_kb": 0,
+                            "reason": "MSI 缓存包已丢失，残留产品项",
+                            "tier": "D",
+                            "kind": "msi-orphan",
+                        })
+                    winreg.CloseKey(ik)
+            finally:
+                winreg.CloseKey(pk)
+    finally:
+        winreg.CloseKey(k)
+    return out
+
+
+def scan_registry():
+    """只读：找出可安全清理的残留注册表项。tier 一律 D（高危，需显式确认+备份）。"""
+    items = []
+    for hive, base in UNINSTALL_ROOTS:
+        for hk, full in _reg_enum_subkeys(hive, base):
+            try:
+                k = winreg.OpenKey(hk, full)
+            except Exception:
+                continue
+            try:
+                try:
+                    name = winreg.QueryValueEx(k, "DisplayName")[0]
+                except Exception:
+                    continue
+                if not name:
+                    continue
+                us = _safe_read(k, "UninstallString")
+                if not us:
+                    continue
+                if not _exe_missing(us):
+                    continue
+                try:
+                    size_kb = winreg.QueryValueEx(k, "EstimatedSize")[0]
+                except Exception:
+                    size_kb = 0
+                key_path = _ROOT_NAMES[hk] + "\\" + full
+                items.append({
+                    "name": name,
+                    "publisher": _safe_read(k, "Publisher"),
+                    "key_path": key_path,
+                    "uninstall_string": us,
+                    "size_kb": int(size_kb) if isinstance(size_kb, int) else 0,
+                    "reason": "卸载程序已不存在，残留注册表项",
+                    "tier": "D",
+                    "kind": "uninstall-orphan",
+                })
+            finally:
+                winreg.CloseKey(k)
+    items += _scan_msi_orphans()
+    items.sort(key=lambda x: -x.get("size_kb", 0))
+    return {"ok": True, "count": len(items), "items": items}
+
+
+def delete_registry_key(full_path, confirm=False):
+    """删除一个注册表项。先 reg export 备份，再 reg delete。需管理员 + confirm。"""
+    if not confirm:
+        return {"ok": False, "error": "未确认，已拒绝", "path": full_path, "backup": None}
+    if not is_admin():
+        return {"ok": False, "error": "需管理员权限（以管理员运行 start.bat）",
+                "path": full_path, "backup": None}
+    if not _reg_path_ok(full_path):
+        return {"ok": False, "error": "路径不在允许的清理范围内（防误删）",
+                "path": full_path, "backup": None}
+    try:
+        if not os.path.isdir(LOG_DIR):
+            os.makedirs(LOG_DIR)
+    except Exception:
+        pass
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    backup = os.path.join(LOG_DIR, "reg_%s.reg" % ts)
+    try:
+        subprocess.run(["reg", "export", full_path, backup, "/y"],
+                       capture_output=True, timeout=30)
+    except Exception:
+        backup = None
+    r = subprocess.run(["reg", "delete", full_path, "/f"],
+                       capture_output=True, timeout=30)
+    still = _reg_key_exists(full_path)
+    ok = (r.returncode == 0) and not still
+    _write_log("=== %s REG-DELETE %s backup=%s ok=%s still=%s ===" %
+               (ts, full_path, bool(backup), ok, still))
+    return {"ok": ok, "path": full_path, "backup": backup, "still_exists": still}
+
+
+def list_programs():
+    """只读：枚举已安装程序（供卸载器引导）。"""
+    items = []
+    for hive, base in UNINSTALL_ROOTS:
+        for hk, full in _reg_enum_subkeys(hive, base):
+            try:
+                k = winreg.OpenKey(hk, full)
+            except Exception:
+                continue
+            try:
+                try:
+                    name = winreg.QueryValueEx(k, "DisplayName")[0]
+                except Exception:
+                    continue
+                if not name:
+                    continue
+                try:
+                    size_kb = winreg.QueryValueEx(k, "EstimatedSize")[0]
+                except Exception:
+                    size_kb = 0
+                key_path = _ROOT_NAMES[hk] + "\\" + full
+                items.append({
+                    "name": name,
+                    "publisher": _safe_read(k, "Publisher"),
+                    "install_location": _safe_read(k, "InstallLocation"),
+                    "uninstall_string": _safe_read(k, "UninstallString"),
+                    "quiet_uninstall_string": _safe_read(k, "QuietUninstallString"),
+                    "key_path": key_path,
+                    "size_kb": int(size_kb) if isinstance(size_kb, int) else 0,
+                })
+            finally:
+                winreg.CloseKey(k)
+    items.sort(key=lambda x: -x.get("size_kb", 0))
+    return items[:500]
+
+
+def get_uninstall_string(key_path):
+    try:
+        hive, sub = _split_reg_path(key_path)
+        k = winreg.OpenKey(hive, sub)
+        us = _safe_read(k, "UninstallString") or _safe_read(k, "QuietUninstallString")
+        winreg.CloseKey(k)
+    except Exception:
+        return None
+    return us
+
+
+def _parse_cmd(cmd):
+    """拆出 (exe, [args])。"""
+    import shlex
+    c = cmd.strip()
+    if c.startswith('"'):
+        end = c.find('"', 1)
+        exe = c[1:end] if end != -1 else c[1:]
+        rest = c[end + 1:].strip()
+    else:
+        parts = c.split(' ', 1)
+        exe = parts[0]
+        rest = parts[1] if len(parts) > 1 else ""
+    exe = _expand_env(exe)
+    args = shlex.split(rest) if rest else []
+    return exe, args
+
+
+def launch_uninstall(key_path):
+    """启动某程序的卸载器。只执行来自 Uninstall 子项的命令，且校验 exe 真实存在。"""
+    us = get_uninstall_string(key_path)
+    if not us:
+        return {"ok": False, "error": "读不到卸载命令"}
+    exe, args = _parse_cmd(us)
+    if not exe or not os.path.exists(exe):
+        return {"ok": False, "error": "卸载程序不存在: %s" % exe}
+    try:
+        subprocess.Popen([exe] + args, shell=False,
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return {"ok": True, "exe": exe, "args": args}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def open_appwiz():
+    """打开系统「程序和功能」控制面板。"""
+    try:
+        subprocess.Popen(["control.exe", "appwiz.cpl"], shell=False,
+                         creationflags=subprocess.CREATE_NEW_CONSOLE)
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+def relaunch_elevated(extra_args=()):
+    """以管理员重启自身（UAC）。成功返回 True。已带 --elevated 防循环。"""
+    params = '"%s"' % os.path.abspath(sys.argv[0])
+    for a in extra_args:
+        params += " " + a
+    if "--elevated" not in sys.argv and "--no-elevate" not in sys.argv:
+        params += " --elevated"
+    r = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, params, os.getcwd(), 1)
+    return r > 32
 
 
 if __name__ == "__main__":

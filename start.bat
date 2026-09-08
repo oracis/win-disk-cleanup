@@ -8,8 +8,10 @@ REM    3. No parentheses inside if (...) blocks.
 REM    4. Use where /q + if not errorlevel 1 instead of >nul.
 REM    5. Use goto label chains, not nested if blocks.
 REM  Open http://127.0.0.1:5053 after launch. Ctrl+C to stop.
-REM  For ProgramData / powercfg / Dism steps, right-click
-REM  this file -> Run as administrator.
+REM  Admin auto-elevation: app.py requests UAC on launch when not
+REM  admin (registry cleanup / ProgramData need it). Right-click ->
+REM  Run as administrator for a clean single-instance, or use the
+REM  "以管理员重启" button / tray menu. Pass --no-elevate to disable.
 REM ============================================================
 
 setlocal

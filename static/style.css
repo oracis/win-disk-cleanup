@@ -33,6 +33,11 @@ body {
 .badge-warn { color: var(--yellow); border-color: var(--yellow); }
 .badge-ok { color: var(--green); border-color: var(--green); }
 .badge-info { color: var(--accent); border-color: var(--accent); }
+.badge-elevate { color: var(--green); border-color: var(--green); background: transparent; font-size: 12px; padding: 3px 10px; border-radius: 999px; }
+.badge-elevate:hover { background: var(--green); color: #06101f; }
+.muted { color: var(--muted); font-size: 12px; }
+.tag-gray { font-size: 11px; color: var(--muted); border: 1px solid var(--border); padding: 1px 8px; border-radius: 999px; font-weight: 400; }
+.btn.sm { padding: 5px 10px; font-size: 12px; }
 
 main { max-width: 980px; margin: 0 auto; padding: 20px; display: flex; flex-direction: column; gap: 18px; }
 .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }

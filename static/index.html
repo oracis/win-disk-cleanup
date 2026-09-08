@@ -17,6 +17,7 @@
   </div>
   <div class="badges">
     <span id="adminBadge" class="badge badge-warn">检测中…</span>
+    <button id="btnElevate" class="badge badge-elevate" style="display:none;cursor:pointer">以管理员重启</button>
     <span class="badge badge-info">清理的是本机磁盘</span>
   </div>
 </header>
@@ -68,6 +69,33 @@
     <h2>④ 清理日志</h2>
     <button id="btnLog" class="btn ghost">刷新日志</button>
     <pre id="logView" class="log"></pre>
+  </section>
+
+  <!-- 注册表清理 -->
+  <section class="card" id="regCard">
+    <h2>⑤ 注册表清理 <span class="tag-gray">残留卸载项 / 孤立 MSI</span></h2>
+    <div class="scan-row">
+      <button id="btnRegScan" class="btn primary">扫描残留注册表项</button>
+      <span class="muted">高危：删除前自动备份到 logs/reg_*.reg，需管理员</span>
+    </div>
+    <div id="regStatus" class="status"></div>
+    <div id="regTable" class="result-table"></div>
+    <div class="action-bar" id="regAction" style="display:none">
+      <div id="regSelInfo" class="sel-info">未选择</div>
+      <button id="btnRegClean" class="btn danger">删除选中注册表项</button>
+    </div>
+  </section>
+
+  <!-- 卸载器引导 -->
+  <section class="card" id="progCard">
+    <h2>⑥ 卸载器引导</h2>
+    <div class="scan-row">
+      <button id="btnProgList" class="btn primary">列出已安装程序</button>
+      <button id="btnAppwiz" class="btn ghost">打开「程序和功能」</button>
+      <input id="progFilter" type="text" placeholder="筛选名称…" />
+    </div>
+    <div id="progStatus" class="status"></div>
+    <div id="progTable" class="result-table"></div>
   </section>
 </main>
 
