@@ -273,6 +273,14 @@ code {
 }
 .tag-danger { color: var(--red); border: 1px solid rgba(242, 92, 92, .5); background: var(--red-soft); }
 
+.admin-warn {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 16px; padding: 12px 14px;
+  background: var(--yellow-soft); color: var(--yellow);
+  border: 1px solid rgba(229, 164, 67, .5); border-radius: var(--radius-sm);
+  font-size: 13px; line-height: 1.5;
+}
+
 /* ---------- Tables ---------- */
 .result-table { margin-top: 14px; }
 .tier-summary { display: flex; gap: 8px; flex-wrap: wrap; }

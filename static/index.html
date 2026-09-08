@@ -155,6 +155,9 @@
         <span class="tag tag-danger">高危 · 操作前自动备份</span>
       </div>
       <p class="lead muted">扫描卸载程序已不存在的残留项，以及孤立的 MSI 产品项。删除前会自动导出备份到 <code>logs/reg_*.reg</code>。</p>
+      <div id="regAdminWarn" class="admin-warn" style="display:none">
+        <span class="icon">🛡️</span> 当前未以管理员运行，注册表删除不可用。请先点击右上角「以管理员重启」。
+      </div>
       <div class="scan-actions">
         <button id="btnRegScan" class="btn primary">扫描残留注册表项</button>
         <span id="regStatus" class="status"></span>

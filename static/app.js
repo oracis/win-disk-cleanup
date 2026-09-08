@@ -9,6 +9,7 @@ const TIER = {
 const TIER_ORDER = ["A", "B", "C", "D"];
 
 let lastScan = null;
+let isAdmin = false;
 const selected = new Set();
 
 // ---------- helpers ----------
@@ -79,9 +80,17 @@ async function loadDisk() {
     '</div>';
   sys.innerHTML = html;
 
+  isAdmin = !!d.admin;
   const b = el("adminBadge");
   if (d.admin) { b.textContent = "管理员 ✓"; b.className = "badge badge-ok"; el("btnElevate").style.display = "none"; }
   else { b.textContent = "非管理员"; b.className = "badge badge-warn"; el("btnElevate").style.display = ""; }
+  updateAdminUI();
+}
+
+function updateAdminUI() {
+  const warn = el("regAdminWarn");
+  if (warn) warn.style.display = isAdmin ? "none" : "";
+  el("btnRegClean").disabled = !isAdmin || regSelected.size === 0;
 }
 
 // ---------- Scan ----------
@@ -258,12 +267,13 @@ function shortPath(p) {
 
 function updateRegSel() {
   el("regSelInfo").innerHTML = "已选 <b>" + regSelected.size + "</b> 项";
-  el("btnRegClean").disabled = regSelected.size === 0;
+  el("btnRegClean").disabled = !isAdmin || regSelected.size === 0;
 }
 
 async function doRegClean() {
   const paths = [...regSelected];
   if (!paths.length) return;
+  if (!isAdmin) { alert("当前未以管理员运行，无法删除注册表项。\n请点击右上角「以管理员重启」后再操作。"); return; }
   if (!confirm("即将永久删除 " + paths.length + " 个注册表项。\n已自动备份到 logs/reg_*.reg。\n确定删除？")) return;
   el("btnRegClean").disabled = true;
   const res = await api("/api/reg-clean", "POST", { paths, confirm: true });
