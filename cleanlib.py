@@ -596,8 +596,120 @@ def scan_registry():
     return {"ok": True, "count": len(items), "items": items}
 
 
+# ---------- 注册表删除（纯 winreg，避免 reg.exe 被安全策略/沙箱拦截） ----------
+def _reg_escape_string(s):
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _hex_value(name, kind, data):
+    """把二进制值写成 .reg 的 hex(...) 行。"""
+    prefix = "hex({}):".format(kind) if kind else "hex:"
+    if isinstance(data, str):
+        data = data.encode("utf-16-le")
+    body = ",".join("{:02x}".format(b) for b in data)
+    if name == "":
+        return "@=" + prefix + body
+    return '"{}"={}{}'.format(_reg_escape_string(name), prefix, body)
+
+
+def _reg_value_line(name, value_type, value):
+    if value_type == winreg.REG_SZ:
+        if name == "":
+            return '@="{}"'.format(_reg_escape_string(value))
+        return '"{}"="{}"'.format(_reg_escape_string(name), _reg_escape_string(value))
+    if value_type == winreg.REG_DWORD:
+        return '"{}"=dword:{:08x}'.format(_reg_escape_string(name), value & 0xffffffff)
+    if value_type == winreg.REG_QWORD:
+        return '"{}"=hex(b):{}'.format(
+            _reg_escape_string(name),
+            ",".join("{:02x}".format(b) for b in value.to_bytes(8, "little")))
+    if value_type == winreg.REG_EXPAND_SZ:
+        return _hex_value(name, 2, value)
+    if value_type == winreg.REG_MULTI_SZ:
+        data = "\0".join(value).encode("utf-16-le") + b"\0\0"
+        return _hex_value(name, 7, data)
+    if value_type == winreg.REG_BINARY:
+        return _hex_value(name, 0, value)
+    # 兜底：按二进制处理
+    return _hex_value(name, 0, value)
+
+
+def _export_reg_key(f, hive, sub, full_path):
+    """递归导出注册表项到 .reg 文件（已打开的文件对象）。"""
+    try:
+        k = winreg.OpenKey(hive, sub, 0, winreg.KEY_READ)
+    except Exception:
+        return
+    try:
+        f.write("[{}]\r\n".format(full_path))
+        nvals = winreg.QueryInfoKey(k)[1]
+        for i in range(nvals):
+            try:
+                name, value, vtype = winreg.EnumValue(k, i)
+                f.write(_reg_value_line(name, vtype, value) + "\r\n")
+            except Exception:
+                pass
+        f.write("\r\n")
+        nsub = winreg.QueryInfoKey(k)[0]
+        children = []
+        for i in range(nsub):
+            try:
+                children.append(winreg.EnumKey(k, i))
+            except Exception:
+                pass
+        for child in children:
+            _export_reg_key(f, hive, sub + "\\" + child, full_path + "\\" + child)
+    finally:
+        winreg.CloseKey(k)
+
+
+def _backup_registry_key(full_path, backup_path):
+    """用 winreg 导出 .reg 备份。成功返回 True。"""
+    try:
+        hive, sub = _split_reg_path(full_path)
+        if not os.path.isdir(os.path.dirname(backup_path)):
+            os.makedirs(os.path.dirname(backup_path))
+        with open(backup_path, "w", encoding="utf-16") as f:
+            f.write("Windows Registry Editor Version 5.00\r\n\r\n")
+            _export_reg_key(f, hive, sub, full_path)
+        return True
+    except Exception:
+        return False
+
+
+def _delete_key_rec(hive, sub):
+    """递归删除注册表项（无子项后删除自身）。"""
+    try:
+        k = winreg.OpenKey(hive, sub, 0, winreg.KEY_ALL_ACCESS)
+    except Exception:
+        return False
+    try:
+        nsub = winreg.QueryInfoKey(k)[0]
+        children = []
+        for i in range(nsub):
+            try:
+                children.append(winreg.EnumKey(k, i))
+            except Exception:
+                pass
+        for child in children:
+            if not _delete_key_rec(hive, sub + "\\" + child):
+                return False
+    except Exception:
+        pass
+    finally:
+        try:
+            winreg.CloseKey(k)
+        except Exception:
+            pass
+    try:
+        winreg.DeleteKey(hive, sub)
+        return True
+    except Exception:
+        return False
+
+
 def delete_registry_key(full_path, confirm=False):
-    """删除一个注册表项。先 reg export 备份，再 reg delete。需管理员 + confirm。"""
+    """删除一个注册表项。先 winreg 导出备份，再 winreg 递归删除。需管理员 + confirm。"""
     if not confirm:
         return {"ok": False, "error": "未确认，已拒绝", "path": full_path, "backup": None}
     if not is_admin():
@@ -613,18 +725,16 @@ def delete_registry_key(full_path, confirm=False):
         pass
     ts = time.strftime("%Y%m%d_%H%M%S")
     backup = os.path.join(LOG_DIR, "reg_%s.reg" % ts)
-    try:
-        subprocess.run(["reg", "export", full_path, backup, "/y"],
-                       capture_output=True, timeout=30)
-    except Exception:
-        backup = None
-    r = subprocess.run(["reg", "delete", full_path, "/f"],
-                       capture_output=True, timeout=30)
+    backup_ok = _backup_registry_key(full_path, backup)
+    del_ok = _delete_key_rec(*_split_reg_path(full_path))
     still = _reg_key_exists(full_path)
-    ok = (r.returncode == 0) and not still
+    ok = del_ok and not still
     _write_log("=== %s REG-DELETE %s backup=%s ok=%s still=%s ===" %
-               (ts, full_path, bool(backup), ok, still))
-    return {"ok": ok, "path": full_path, "backup": backup, "still_exists": still}
+               (ts, full_path, backup_ok, ok, still))
+    return {"ok": ok, "path": full_path,
+            "backup": backup if backup_ok else None,
+            "still_exists": still,
+            "error": "" if ok else "删除失败，可能正被占用或权限不足"}
 
 
 def list_programs():
